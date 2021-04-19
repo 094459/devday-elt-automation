@@ -661,7 +661,7 @@ def py_display_variables(**kwargs):
     print("Data Lake location " + s3_dlake + " ")
     print("Data within Lake " + s3_data + " ")
     print("EMR DB " + emr_db + " ")
-    print("Genre " + emr_genre + " ")
+    print("Genre " + genre + " ")
 
 disp_variables = PythonOperator (
 	task_id='print_variables',
@@ -700,7 +700,7 @@ CREATE_TABLES = [
                 '--run-hive-script',
                 '--args',
                 '-f',
-                's3://{{ var.value.s3_dlake }}/scripts/create-film-tables.hql'
+                's3://{{ var.value.s3_dlake }}/scripts/create-film-db-tables.hql'
             ]
         }
     }
@@ -818,6 +818,7 @@ JOB_FLOW_OVERRIDES = {
     ]
 }
 
+### To Do - create these dynamically and then upload to scripts folder
 
 HIVE_CREATE_DB = """
 create database {database}; 
@@ -871,24 +872,24 @@ SELECT title, replace(substr(trim(title),-5),')','') as year, AVG(rating) as avr
 
 ## Supporting Python callables
 
-def create_emr_scripts(**kwargs):
+def py_create_emr_scripts(**kwargs):
     s3 = boto3.resource('s3')
     print("Creating scripts which will be executed by Amazon EMR - will overwrite existing scripts")
     # create create-film-db.hql
-    object = s3.Object(s3_dlake, 'scripts/create-film-db.hql')
-    object.put(Body=HIVE_CREATE_DB)
+    object1 = s3.Object(s3_dlake, 'scripts/create-film-db.hql')
+    object1.put(Body=HIVE_CREATE_DB)
     # create create-film-db-tables.hql
-    object = s3.Object(s3_dlake, 'scripts/create-film-db-tables.hql')
-    object.put(Body=HIVE_CREATE_DB_TABLES)
+    object2 = s3.Object(s3_dlake, 'scripts/create-film-db-tables.hql')
+    object2.put(Body=HIVE_CREATE_DB_TABLES)
     # create create-genre-film-table.hql
-    object = s3.Object(s3_dlake, 'scripts/create-film-db.hql')
-    object.put(Body=HIVE_CREATE_GENRE_TABLE)
+    object3 = s3.Object(s3_dlake, 'scripts/create-genre-film-table.hql')
+    object3.put(Body=HIVE_CREATE_GENRE_TABLE)
     # create create-genre.sql
-    object = s3.Object(s3_dlake, 'scripts/create-genre.sql')
-    object.put(Body=PRESTO_SQL_GEN_GENRE_CSV)
+    object4 = s3.Object(s3_dlake, 'scripts/create-genre.sql')
+    object4.put(Body=PRESTO_SQL_GEN_GENRE_CSV)
     # create run-presto-query.sh
-    object = s3.Object(s3_dlake, 'scripts/run-presto-query.sh')
-    object.put(Body=PRESTO_SCRIPT_RUN_EXPFILE)   
+    object5 = s3.Object(s3_dlake, 'scripts/run-presto-query.sh')
+    object5.put(Body=PRESTO_SCRIPT_RUN_EXPFILE)   
 
 def check_emr_database(**kwargs):
     ath = boto3.client('athena')
@@ -920,6 +921,13 @@ def check_emr_table(**kwargs):
         return "check_emr_movie_table_skip" 
 
 ## Dags
+
+create_emr_scripts = PythonOperator (
+	task_id='create_emr_scripts',
+	provide_context=True,
+	python_callable=py_create_emr_scripts,
+	dag=dag
+	)
 
 check_emr_database = BranchPythonOperator(
     task_id='check_emr_database',
@@ -1025,7 +1033,7 @@ create_comedy_table_sensor = EmrStepSensor(
 
 
 
-disp_variables >> create_emr_database_cluster >> check_emr_database
+disp_variables >> create_emr_scripts >> create_emr_database_cluster >> check_emr_database
 
 check_emr_database >> skip_emr_database_creation >> emr_database_checks_done  
 check_emr_database >> create_emr_database_step >> create_emr_database_sensor >> create_emr_tables_step >> create_emr_tables_sensor >> emr_database_checks_done 
