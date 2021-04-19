@@ -656,12 +656,15 @@ s3_data = Variable.get("s3_data", default_var="undefined")
 emr_db = Variable.get("emr_db", default_var="undefined")
 emr_output = Variable.get("emr_output", default_var="undefined")
 genre = Variable.get("emr_genre", default_var="undefined")
+genre_t = Variable.get("emr_genre_table", default_var="undefined")
+
 
 def py_display_variables(**kwargs):
-    print("Data Lake location " + s3_dlake + " ")
-    print("Data within Lake " + s3_data + " ")
-    print("EMR DB " + emr_db + " ")
-    print("Genre " + genre + " ")
+    print("Data Lake location " + s3_dlake)
+    print("Data within Lake " + s3_data)
+    print("EMR DB " + emr_db)
+    print("Genre " + genre)
+    print("Genre Table to be created " + genre_t)
 
 disp_variables = PythonOperator (
 	task_id='print_variables',
@@ -674,7 +677,7 @@ disp_variables = PythonOperator (
 
 CREATE_DATABASE = [
     {
-        'Name': 'Create Comedy Database',
+        'Name': 'Create Genre Database',
         'ActionOnFailure': 'CONTINUE',
         'HadoopJarStep': {
             'Jar': 'command-runner.jar',
@@ -708,7 +711,7 @@ CREATE_TABLES = [
 
 PRESTO_QUERY = [
     {
-        'Name': 'Run Presto to Comedy Tables',
+        'Name': 'Run Presto to create Genre Tables',
         'ActionOnFailure': 'CONTINUE',
         'HadoopJarStep': {
             'Jar': 'command-runner.jar',
@@ -721,9 +724,9 @@ PRESTO_QUERY = [
     }
 ]
 
-CREATE_COMEDY_TABLES = [
+CREATE_GENRE_TABLES = [
     {
-        'Name': 'Create Comedy Tables',
+        'Name': 'Create Genre Tables',
         'ActionOnFailure': 'CONTINUE',
         'HadoopJarStep': {
             'Jar': 'command-runner.jar',
@@ -818,7 +821,7 @@ JOB_FLOW_OVERRIDES = {
     ]
 }
 
-### To Do - create these dynamically and then upload to scripts folder
+### Amazon EMR Scripts - create and upload to Amazon S3
 
 HIVE_CREATE_DB = """
 create database {database}; 
@@ -844,21 +847,21 @@ CREATE EXTERNAL TABLE {database}.ratings (
 """.format(database=emr_db,datalake=s3_dlake)
 
 HIVE_CREATE_GENRE_TABLE = """
-CREATE EXTERNAL TABLE {database}.{genre} (
+CREATE EXTERNAL TABLE {database}.{genre_t} (
     title   STRING,
     year    INT,
     rating  INT
 
 ) ROW FORMAT DELIMITED FIELDS TERMINATED BY '\t'
   LOCATION 's3://{datalake}/movielens/{genre}/';
-""".format(database=emr_db,genre=genre,datalake=s3_dlake)
+""".format(database=emr_db,genre=genre,datalake=s3_dlake,genre_t=genre_t)
 
 PRESTO_SCRIPT_RUN_EXPFILE = """
 #!/bin/bash
 aws s3 cp s3://{datalake}/scripts/create-genre.sql .
-presto-cli --catalog hive -f create-genre.sql --output-format TSV > {genre}-films.tsv
-aws s3 cp {genre}-films.tsv s3://{datalake}/movielens/{genre}/
-""".format(database=emr_db,genre=genre,datalake=s3_dlake)
+presto-cli --catalog hive -f create-genre.sql --output-format TSV > {genre_t}-films.tsv
+aws s3 cp {genre_t}-films.tsv s3://{datalake}/movielens/{genre}/
+""".format(database=emr_db,genre=genre,datalake=s3_dlake,genre_t=genre_t)
 
 PRESTO_SQL_GEN_GENRE_CSV = """
 WITH {genre}data AS (
@@ -866,7 +869,7 @@ SELECT REPLACE ( m.title , '"' , '' ) as title, r.rating
 FROM {database}.movies m
 INNER JOIN (SELECT rating, movieId FROM {database}.ratings) r on m.movieId = r.movieId WHERE REGEXP_LIKE (genres, '{genre}')
   )
-SELECT title, replace(substr(trim(title),-5),')','') as year, AVG(rating) as avrating from {genre}data GROUP BY title ORDER BY year DESC,  title ASC
+SELECT title, replace(substr(trim(title),-5),')','') as year, AVG(rating) as avrating from {genre}data GROUP BY title ORDER BY year DESC,  title ASC ;
 """.format(database=emr_db,genre=genre)
 
 
@@ -914,7 +917,7 @@ def check_emr_table(**kwargs):
             TableName='movies'
         )
         # we check for movies, but we will be creating comedy
-        print("Table exists - create comedy")
+        print("Table exists - create genre")
         return "run_presto_script_step"
     except:
         print("No Table Found - skip, as there are bigger problems!")
@@ -986,7 +989,6 @@ create_emr_tables_sensor = EmrStepSensor(
     aws_conn_id='aws_default',
     )
 
-
 check_emr_movie_table = BranchPythonOperator(
     task_id='check_emr_movie_table',
     provide_context=True,
@@ -1018,19 +1020,18 @@ run_presto_script_sensor = EmrStepSensor(
     aws_conn_id='aws_default',
     )
 
-create_comedy_table_step = EmrAddStepsOperator(
-    task_id='create_comedy_table_step',
+create_genre_table_step = EmrAddStepsOperator(
+    task_id='create_genre_table_step',
     job_flow_id="{{ task_instance.xcom_pull(task_ids='create_emr_database_cluster', key='return_value') }}",
     aws_conn_id='aws_default',
-    steps=CREATE_COMEDY_TABLES,
+    steps=CREATE_GENRE_TABLES,
     )
-create_comedy_table_sensor = EmrStepSensor(
-    task_id='create_comedy_table_sensor',
+create_genre_table_sensor = EmrStepSensor(
+    task_id='create_genre_table_sensor',
     job_flow_id="{{ task_instance.xcom_pull('create_emr_database_cluster', key='return_value') }}",
-    step_id="{{ task_instance.xcom_pull(task_ids='create_comedy_table_step', key='return_value')[0] }}",
+    step_id="{{ task_instance.xcom_pull(task_ids='create_genre_table_step', key='return_value')[0] }}",
     aws_conn_id='aws_default',
     )
-
 
 
 disp_variables >> create_emr_scripts >> create_emr_database_cluster >> check_emr_database
@@ -1038,8 +1039,8 @@ disp_variables >> create_emr_scripts >> create_emr_database_cluster >> check_emr
 check_emr_database >> skip_emr_database_creation >> emr_database_checks_done  
 check_emr_database >> create_emr_database_step >> create_emr_database_sensor >> create_emr_tables_step >> create_emr_tables_sensor >> emr_database_checks_done 
 
-emr_database_checks_done >> check_emr_movie_table >> run_presto_script_step >> run_presto_script_sensor >> check_emr_movie_table_done >> create_comedy_table_step >> create_comedy_table_sensor >> terminate_emr_cluster
-emr_database_checks_done >> check_emr_movie_table >> check_emr_movie_table_skip >> check_emr_movie_table_done >> create_comedy_table_step >> create_comedy_table_sensor >> terminate_emr_cluster 
+emr_database_checks_done >> check_emr_movie_table >> run_presto_script_step >> run_presto_script_sensor >> check_emr_movie_table_done >> create_genre_table_step >> create_genre_table_sensor >> terminate_emr_cluster
+emr_database_checks_done >> check_emr_movie_table >> check_emr_movie_table_skip >> check_emr_movie_table_done >> create_genre_table_step >> create_genre_table_sensor >> terminate_emr_cluster 
 ```
 
 #### Problems/Issues
