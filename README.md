@@ -774,7 +774,7 @@ JOB_FLOW_OVERRIDES = {
             {
                 'Name': 'CORE',
                 'InstanceFleetType': 'CORE',
-                'TargetSpotCapacity': 2,
+                'TargetSpotCapacity': 1,
                 'InstanceTypeConfigs': [
                     {
                         'InstanceType': 'r5.xlarge',
@@ -869,7 +869,7 @@ SELECT REPLACE ( m.title , '"' , '' ) as title, r.rating
 FROM {database}.movies m
 INNER JOIN (SELECT rating, movieId FROM {database}.ratings) r on m.movieId = r.movieId WHERE REGEXP_LIKE (genres, '{genre}')
   )
-SELECT title, replace(substr(trim(title),-5),')','') as year, AVG(rating) as avrating from {genre}data GROUP BY title ORDER BY year DESC,  title ASC ;
+SELECT substr(title,1, LENGTH(title) -6) as title, replace(substr(trim(title),-5),')','') as year, AVG(rating) as avrating from {genre}data GROUP BY title ORDER BY year DESC,  title ASC ;
 """.format(database=emr_db,genre=genre)
 
 
@@ -916,12 +916,36 @@ def check_emr_table(**kwargs):
             DatabaseName= emr_db,
             TableName='movies'
         )
-        # we check for movies, but we will be creating comedy
         print("Table exists - create genre")
         return "run_presto_script_step"
     except:
         print("No Table Found - skip, as there are bigger problems!")
         return "check_emr_movie_table_skip" 
+
+def check_genre_table(**kwargs):
+    ath = boto3.client('athena')
+    try:
+        response = ath.get_table_metadata(
+            CatalogName='AwsDataCatalog',
+            DatabaseName= emr_db,
+            TableName=genre_t
+        )
+        print("Table exists - skip creation we are done")
+        return "skip_genre_table_creation"
+    except:
+        print("No Table Found - lets carry on")
+        return "create_genre_table_step" 
+
+def cleanup_emr_cluster_if_steps_fail(context):
+    print("This is invoked when a running EMR cluster has a step running that fails.")
+    print("If we do not do this, the DAG will stop but the cluster will still keep running")
+    
+    early_terminate_emr_cluster = EmrTerminateJobFlowOperator(
+        task_id='terminate_emr_cluster',
+        job_flow_id=context["ti"].xcom_pull('create_emr_database_cluster'),
+        aws_conn_id='aws_default',
+        )
+    return early_terminate_emr_cluster.execute(context=context)
 
 ## Dags
 
@@ -955,12 +979,14 @@ create_emr_database_step = EmrAddStepsOperator(
     task_id='create_emr_database_step',
     job_flow_id="{{ task_instance.xcom_pull(task_ids='create_emr_database_cluster', key='return_value') }}",
     aws_conn_id='aws_default',
+    on_failure_callback=cleanup_emr_cluster_if_steps_fail,
     steps=CREATE_DATABASE,
     )
 create_emr_database_sensor = EmrStepSensor(
     task_id='create_emr_database_sensor',
     job_flow_id="{{ task_instance.xcom_pull('create_emr_database_cluster', key='return_value') }}",
     step_id="{{ task_instance.xcom_pull(task_ids='create_emr_database_step', key='return_value')[0] }}",
+    on_failure_callback=cleanup_emr_cluster_if_steps_fail,
     aws_conn_id='aws_default',
     )
 
@@ -980,6 +1006,7 @@ create_emr_tables_step = EmrAddStepsOperator(
     task_id='create_emr_tables_step',
     job_flow_id="{{ task_instance.xcom_pull(task_ids='create_emr_database_cluster', key='return_value') }}",
     aws_conn_id='aws_default',
+    on_failure_callback=cleanup_emr_cluster_if_steps_fail,
     steps=CREATE_TABLES,
     )
 create_emr_tables_sensor = EmrStepSensor(
@@ -987,6 +1014,7 @@ create_emr_tables_sensor = EmrStepSensor(
     job_flow_id="{{ task_instance.xcom_pull('create_emr_database_cluster', key='return_value') }}",
     step_id="{{ task_instance.xcom_pull(task_ids='create_emr_tables_step', key='return_value')[0] }}",
     aws_conn_id='aws_default',
+    on_failure_callback=cleanup_emr_cluster_if_steps_fail,
     )
 
 check_emr_movie_table = BranchPythonOperator(
@@ -1011,6 +1039,7 @@ run_presto_script_step = EmrAddStepsOperator(
     task_id='run_presto_script_step',
     job_flow_id="{{ task_instance.xcom_pull(task_ids='create_emr_database_cluster', key='return_value') }}",
     aws_conn_id='aws_default',
+    on_failure_callback=cleanup_emr_cluster_if_steps_fail,
     steps=PRESTO_QUERY,
     )
 run_presto_script_sensor = EmrStepSensor(
@@ -1018,12 +1047,14 @@ run_presto_script_sensor = EmrStepSensor(
     job_flow_id="{{ task_instance.xcom_pull('create_emr_database_cluster', key='return_value') }}",
     step_id="{{ task_instance.xcom_pull(task_ids='run_presto_script_step', key='return_value')[0] }}",
     aws_conn_id='aws_default',
+    on_failure_callback=cleanup_emr_cluster_if_steps_fail,
     )
 
 create_genre_table_step = EmrAddStepsOperator(
     task_id='create_genre_table_step',
     job_flow_id="{{ task_instance.xcom_pull(task_ids='create_emr_database_cluster', key='return_value') }}",
     aws_conn_id='aws_default',
+    on_failure_callback=cleanup_emr_cluster_if_steps_fail,
     steps=CREATE_GENRE_TABLES,
     )
 create_genre_table_sensor = EmrStepSensor(
@@ -1031,7 +1062,27 @@ create_genre_table_sensor = EmrStepSensor(
     job_flow_id="{{ task_instance.xcom_pull('create_emr_database_cluster', key='return_value') }}",
     step_id="{{ task_instance.xcom_pull(task_ids='create_genre_table_step', key='return_value')[0] }}",
     aws_conn_id='aws_default',
+    on_failure_callback=cleanup_emr_cluster_if_steps_fail,
     )
+
+check_genre_table = BranchPythonOperator(
+    task_id='check_genre_table',
+    provide_context=True,
+    python_callable=check_genre_table,
+    retries=1,
+    dag=dag,
+)
+skip_genre_table_creation = DummyOperator(
+    task_id="skip_genre_table_creation",
+    trigger_rule=TriggerRule.NONE_FAILED,
+    dag=dag,
+)
+check_genre_table_done = DummyOperator(
+    task_id="check_genre_table_done",
+    trigger_rule=TriggerRule.ONE_SUCCESS,
+    dag=dag,
+)
+
 
 
 disp_variables >> create_emr_scripts >> create_emr_database_cluster >> check_emr_database
@@ -1039,8 +1090,12 @@ disp_variables >> create_emr_scripts >> create_emr_database_cluster >> check_emr
 check_emr_database >> skip_emr_database_creation >> emr_database_checks_done  
 check_emr_database >> create_emr_database_step >> create_emr_database_sensor >> create_emr_tables_step >> create_emr_tables_sensor >> emr_database_checks_done 
 
-emr_database_checks_done >> check_emr_movie_table >> run_presto_script_step >> run_presto_script_sensor >> check_emr_movie_table_done >> create_genre_table_step >> create_genre_table_sensor >> terminate_emr_cluster
-emr_database_checks_done >> check_emr_movie_table >> check_emr_movie_table_skip >> check_emr_movie_table_done >> create_genre_table_step >> create_genre_table_sensor >> terminate_emr_cluster 
+emr_database_checks_done >> check_emr_movie_table >> run_presto_script_step >> run_presto_script_sensor >> check_emr_movie_table_done >> check_genre_table 
+emr_database_checks_done >> check_emr_movie_table >> check_emr_movie_table_skip >> check_emr_movie_table_done >> check_genre_table 
+
+check_genre_table >> create_genre_table_step >> create_genre_table_sensor >> check_genre_table_done >> terminate_emr_cluster 
+check_genre_table >> skip_genre_table_creation >> check_genre_table_done >> terminate_emr_cluster
+
 ```
 
 #### Problems/Issues
