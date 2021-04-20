@@ -605,7 +605,15 @@ CREATE EXTERNAL TABLE films.comedy (
 
 To automate this workflow, we are going to use the following approach:
 
-To run in Amazon EMR, we will generate our HIVE and Presto sql scripts and upload to an s3 bucket, and then run these scripts via an Amazon EMR script runner task. This will be automed all by our Airflow DAG. Some things to notice:
+To run in Amazon EMR, we will generate our HIVE and Presto sql scripts and upload to an s3 bucket, and then run these scripts via an Amazon EMR script runner task. These are what the tasks looke like:
+
+![task1](images/emr-wf1.png)
+![task2](images/emr-wf2.png)
+![task3](images/emr-wf3.png)
+
+
+
+This will be automed all by our Airflow DAG. Some things to notice:
 
 * We are generating the information that will be submitted to the Amazon EMR cluster to run - we will create an auto-terminating cluster as we want to optimise the costs of running these jobs
 * We define some additional variables we store in AWS Secrets Manager - we are specifically now defining the genre, so whilst this example sets Comedy, we could change that variable and we could create tables/views for any genre the business might need.
