@@ -109,7 +109,7 @@ SELECT REPLACE ( m.title , '"' , '' ) as title, r.rating
 FROM scifimovies.movies m
 INNER JOIN (SELECT rating, movieId FROM scifimovies.ratings) r on m.movieId = r.movieId WHERE REGEXP_LIKE (genres, 'Sci-Fi')
 )
-SELECT title, replace(substr(trim(title),-5),')','') as year, AVG(rating) as avrating from scifidata GROUP BY title ORDER BY year DESC,  title ASC;
+SELECT substr(title,1, LENGTH(title) -6) as title, replace(substr(trim(title),-5),')','') as year, AVG(rating) as avrating from scifidata GROUP BY title ORDER BY year DESC,  title ASC;
 
 ```
 
@@ -219,7 +219,7 @@ SELECT REPLACE ( m.title , '"' , '' ) as title, r.rating
 FROM {database}.movies m
 INNER JOIN (SELECT rating, movieId FROM {database}.ratings) r on m.movieId = r.movieId WHERE REGEXP_LIKE (genres, 'Sci-Fi')
 )
-SELECT title, replace(substr(trim(title),-5),')','') as year, AVG(rating) as avrating from scifidata GROUP BY title ORDER BY year DESC,  title ASC;
+SELECT substr(title,1, LENGTH(title) -6) as title, replace(substr(trim(title),-5),')','') as year, AVG(rating) as avrating from scifidata GROUP BY title ORDER BY year DESC,  title ASC;
 """.format(database=athena_db)
 
 def py_display_variables(**kwargs):
@@ -245,7 +245,6 @@ def check_athena_database(**kwargs):
         )
         print("Database already exists - skip creation")
         return "skip_athena_database_creation"
-        #return "check_athena_export_table_done"
     except:
         print("No Database Found")
         return "create_athena_database"
@@ -534,6 +533,11 @@ clear_export_folder.set_upstream(check_athena_export_table_pass)
 export_scifi_tofile.set_upstream(export_athena_scifi_table)
 ```
 
+You run this you need to just enable the DAG and then trigger it. Once it has completed, check to make sure that the new tables have been created (it should created a new database called scififilms, with tables movies, ratings and scifi) which can preview to make sure the content looks as it should. You can then check the Amazon S3 datalake and you should see a new folder under the movielens folder called scifi which contains the export file.
+
+Repeat the workflow several times to see how it changes direction based on what already exists.
+
+
 #### Demo Two
 
 For the second demo, we repeat the scenarios but this time we prefer to use Hive and Presto via Amazon EMR.
@@ -582,7 +586,7 @@ SELECT REPLACE ( m.title , '"' , '' ) as title, r.rating
 FROM films.movies m
 INNER JOIN (SELECT rating, movieId FROM films.ratings) r on m.movieId = r.movieId WHERE REGEXP_LIKE (genres, 'Comedy')
   )
-SELECT title, replace(substr(trim(title),-5),')','') as year, AVG(rating) as avrating from comedydata GROUP BY title ORDER BY year DESC,  title ASC
+SELECT substr(title,1, LENGTH(title) -6) as title, replace(substr(trim(title),-5),')','') as year, AVG(rating) as avrating from comedydata GROUP BY title ORDER BY year DESC,  title ASC
 ```
 
 So far so good, now lets create the export file. We will do this from the presto-cli, and create an output file. You will now need to connect via ssh to the Amazon EMR head node.
@@ -1097,6 +1101,19 @@ check_genre_table >> create_genre_table_step >> create_genre_table_sensor >> che
 check_genre_table >> skip_genre_table_creation >> check_genre_table_done >> terminate_emr_cluster
 
 ```
+
+You run this you need to just enable the DAG and then trigger it. Once it has completed, check to make sure that the new tables have been created (it should created a new database called films, with tables movies, ratings and whatever you set the value of genre - Comedy, Action, Horror are all good examples) which can preview to make sure the content looks as it should. You can then check the Amazon S3 datalake and you should see a new folder under the movielens folder called the same name as the genre you set and this should contain the export file.
+
+Repeat the workflow several times to see how it changes direction based on what already exists.
+
+#### What Next?
+
+With the steps now automated, it is not hard to see how you might build upon these. Some examples might be:
+
+* using a function you deploy on AWS Lambda to trigger the automated workflow - for example, a new data update you receive can lead to automatically these tables/export files being refreshed
+* using other Airflow operators such as the ones to Amazon SageMaker that allow you to trigger automatic machine learning model training/tuning
+* using additional workflows as part of the ingestion workflows to get the movielens database into the datalake, which then triggers the ELT workflows
+
 
 #### Problems/Issues
 
