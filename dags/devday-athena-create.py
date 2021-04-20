@@ -81,7 +81,7 @@ SELECT REPLACE ( m.title , '"' , '' ) as title, r.rating
 FROM {database}.movies m
 INNER JOIN (SELECT rating, movieId FROM {database}.ratings) r on m.movieId = r.movieId WHERE REGEXP_LIKE (genres, 'Sci-Fi')
 )
-SELECT title, replace(substr(trim(title),-5),')','') as year, AVG(rating) as avrating from scifidata GROUP BY title ORDER BY year DESC,  title ASC;
+SELECT substr(title,1, LENGTH(title) -6) as title, replace(substr(trim(title),-5),')','') as year, AVG(rating) as avrating from scifidata GROUP BY title ORDER BY year DESC,  title ASC;
 """.format(database=athena_db)
 
 def py_display_variables(**kwargs):
