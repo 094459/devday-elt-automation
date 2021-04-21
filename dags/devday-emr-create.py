@@ -1,7 +1,6 @@
 from airflow import DAG, settings, secrets
 from airflow.operators.python_operator import PythonOperator, BranchPythonOperator
 from airflow.operators.dummy_operator import DummyOperator
-from airflow.contrib.operators.aws_athena_operator import AWSAthenaOperator
 from airflow.contrib.secrets.aws_secrets_manager import SecretsManagerBackend
 from airflow.contrib.operators.emr_add_steps_operator import EmrAddStepsOperator
 from airflow.contrib.operators.emr_create_job_flow_operator import EmrCreateJobFlowOperator
@@ -30,7 +29,7 @@ DAG_ID = os.path.basename(__file__).replace('.py', '')
 dag = DAG(
     dag_id=DAG_ID,
     default_args=default_args,
-    description='DevDay EMR create SciFi DAG',
+    description='DevDay EMR DAG',
     schedule_interval=None,
     start_date=days_ago(2),
     tags=['devday','demo'],
@@ -39,7 +38,6 @@ dag = DAG(
 # Set Variables used in tasks and stored in AWS Secrets Manager
 
 s3_dlake = Variable.get("s3_dlake", default_var="undefined")
-s3_data = Variable.get("s3_data", default_var="undefined")
 emr_db = Variable.get("emr_db", default_var="undefined")
 emr_output = Variable.get("emr_output", default_var="undefined")
 genre = Variable.get("emr_genre", default_var="undefined")
@@ -48,7 +46,6 @@ genre_t = Variable.get("emr_genre_table", default_var="undefined")
 
 def py_display_variables(**kwargs):
     print("Data Lake location " + s3_dlake)
-    print("Data within Lake " + s3_data)
     print("EMR DB " + emr_db)
     print("Genre " + genre)
     print("Genre Table to be created " + genre_t)

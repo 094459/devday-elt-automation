@@ -34,7 +34,6 @@ dag = DAG(
 # Set Variables used in tasks and stored in AWS Secrets Manager
 
 s3_dlake = Variable.get("s3_dlake", default_var="undefined")
-s3_data = Variable.get("s3_data", default_var="undefined")
 athena_db = Variable.get("athena_db", default_var="undefined")
 athena_output = Variable.get("athena_output", default_var="undefined")
 
@@ -86,7 +85,6 @@ SELECT substr(title,1, LENGTH(title) -6) as title, replace(substr(trim(title),-5
 
 def py_display_variables(**kwargs):
     print("Data Lake location " + s3_dlake + " ")
-    print("Data within Lake " + s3_data + " ")
     print("New Athena DB " + athena_db + " ")
     print("Output CSV file we create " + athena_output + " ")
 
