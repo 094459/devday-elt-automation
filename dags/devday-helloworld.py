@@ -1,7 +1,7 @@
 from airflow import DAG, settings, secrets
 from airflow.operators.python_operator import PythonOperator
-from airflow.contrib.secrets.aws_secrets_manager import SecretsManagerBackend
-from airflow.contrib.hooks.aws_hook import AwsHook
+#from airflow.contrib.secrets.aws_secrets_manager import SecretsManagerBackend
+#from airflow.contrib.hooks.aws_hook import AwsHook
 from airflow.models import Variable
 from airflow.utils.dates import days_ago
 import os
